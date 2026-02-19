@@ -11,13 +11,13 @@ from app.config import settings
 
 def send_signed_test_webhook():
     # 1. Configuración de la prueba
-    url = "http://127.0.0.1:8080/webhooks/assignments"
+    url = "https://nexus-legal-api-223080314602.us-central1.run.app/webhooks/assignments"
     # IMPORTANTE: Usa el secreto de Assignments que está en tu .env
     secret = settings.clickup_webhook_secret_assignments
     
     # 2. El payload que ClickUp enviaría (formato Webhook)
     payload_dict = {
-        "task_id": "86b3ena9g",
+        "task_id": "86b8b6u8w",
         "event": "taskUpdated",
         "webhook_id": "test-debug-123"
     }

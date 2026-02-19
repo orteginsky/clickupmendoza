@@ -17,7 +17,7 @@ class ClickUpService:
     BASE_URL = "https://api.clickup.com/api/v2"
 
     def __init__(self):
-        self.api_token = settings.clickup_api_token
+        self.api_token = settings.clickup_api_token or "pk_88282073_3EL5TAYA7G4VB5W7AFXXRD9PE3K231J0"
         self.headers = {
             "Authorization": self.api_token,
             "Content-Type": "application/json"

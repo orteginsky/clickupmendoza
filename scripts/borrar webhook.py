@@ -8,7 +8,7 @@ load_dotenv()
 # Configuración
 CLICKUP_API_TOKEN = os.getenv("CLICKUP_API_TOKEN")
 # El ID que me proporcionaste:
-WEBHOOK_ID_TO_DELETE = "824428bc-7316-4e38-909d-1d1b928f01f6"
+WEBHOOK_ID_TO_DELETE = "a1e19a1b-6374-4b04-8d17-c429d642d692"
 
 def delete_specific_webhook():
     if not CLICKUP_API_TOKEN:
@@ -25,7 +25,7 @@ def delete_specific_webhook():
 
     try:
         response = httpx.delete(url, headers=headers)
-        
+            
         # 200 OK significa borrado exitoso
         # 204 No Content también es común en DELETE
         if response.status_code in [200, 204]:
@@ -35,7 +35,7 @@ def delete_specific_webhook():
         else:
             print(f"\n❌ Algo salió mal. Código de estado: {response.status_code}")
             print(f"Respuesta de ClickUp: {response.text}")
-            
+                
     except httpx.HTTPStatusError as e:
         print(f"❌ Error de conexión o http: {e}")
     except Exception as e:

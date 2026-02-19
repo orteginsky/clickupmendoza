@@ -6,16 +6,16 @@ import os
 
 # --- CONFIGURACIÓN DE PRUEBA ---
 # 1. La URL de tu servicio en Cloud Run
-WEBHOOK_URL = "https://nexus-legal-api-223080314602.us-central1.run.app/webhooks/clickup"
+WEBHOOK_URL = "https://nexus-legal-api-223080314602.us-central1.run.app/webhooks/assignments"
 
 # 2. El secreto que OBTUVISTE al crear el webhook en Mirror DVS
 # (Pégalo aquí tal cual te lo dio el script de creación)
-SECRET = "BVD5B1POQG6RVV2ZDUUC1NLDXV7S6KHKNMWBIBRR0OQ38NSNOSFBAW48B5JDNH48" 
+SECRET = "ETN22NB2G9PO4G261LLSO1DBLGYW1GPYT5TT0MI644OGJ4KYBMD7TDH6ZSL1C6L6" 
 
 # 3. Datos falsos para la prueba
 payload = {
     "event": "taskUpdated",
-    "task_id": "86b86x0pf", # Un ID real o inventado
+    "task_id": "86b8ba21r", # Un ID real o inventado
     "history_items": [],
     "webhook_id": "uncodigo"
 }

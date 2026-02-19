@@ -59,29 +59,24 @@ async def clickup_webhook(
     task_data = await clickup_service.get_task(task_id)
     if not task_data:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    """
-    # Filtro de lista
-    task_list_id = task_data.get("list", {}).get("id")
-    if settings.clickup_list_id and task_list_id != settings.clickup_list_id:
-        return {"status": "ignored", "reason": "wrong_list"}
-    """
     
     # 3. Lógica del Trigger
     link_intake_value = None
     custom_fields = task_data.get("custom_fields", [])
 
-    for field in custom_fields:
-        if field.get("name") == settings.clickup_trigger_condicional:
-            link_intake_value = field.get("value")
-            break
-
-    # --- PROTECCIÓN CONTRA BUCLES ---
     ai_link_exists = False
+    
     for field in custom_fields:
-        if field.get("id") == settings.clickup_field_id_ai_link:
+        field_id = field.get("id")
+        
+        # Detectar el Trigger (Link Intake)
+        if field_id == settings.clickup_field_id_link_intake:
+            link_intake_value = field.get("value")
+            
+        # Detectar Protección contra bucles (AI Link)
+        if field_id == settings.clickup_field_id_ai_link:
             if field.get("value"): 
                 ai_link_exists = True
-                break
     
     if ai_link_exists:
          logger.info(f"Task {task_id} ya tiene Link AI generado. Ignorando para evitar bucle.")
@@ -180,20 +175,35 @@ async def _dispatch_to_external_service(task_id: str, task_data: dict, link_inta
 
 async def _sync_to_google_sheets(task_data: dict) -> bool:
     """
-    Sincronización a Sheets (Ahora en background)
+    Sincronización a Sheets con extracción de campos específicos desde task_name.
     """
     try:
         sheets_service = GoogleSheetsService()
         
+        task_name = task_data.get("name", "")
+        
+        # 1. Extraer 'name' (todo antes de '|')
+        # Si no hay '|', toma el nombre completo.
+        extracted_name = task_name.split('|')[0].strip() if task_name else ""
+
+        # 2. Extraer 'dvs_name' (todo después de ' with ')
+        # Si no existe ' with ', se deja vacío o podrías poner un valor por defecto.
+        dvs_name = "Sin DVS"
+        if " with " in task_name:
+            dvs_name = task_name.split(" with ")[-1].strip()
+
         data = {
             "task_id": task_data.get("id"),
-            "task_name": task_data.get("name"),
+            "task_name": task_name,
+            "name": extracted_name,
+            "dvs_name": dvs_name,
             "status": task_data.get("status", {}).get("status"),
             "url": task_data.get("url"),
             "date_created": task_data.get("date_created"),
             "date_updated": task_data.get("date_updated"),
         }
 
+        # Procesamiento de campos personalizados (Custom Fields)
         for field in task_data.get("custom_fields", []):
             field_name = field.get("name", "").lower().replace(" ", "_")
             field_value = field.get("value")

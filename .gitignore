@@ -9,7 +9,6 @@ env/
 ENV/
 
 # Variables de entorno y secretos
-.env
 .env.local
 .env.production
 .env.staging

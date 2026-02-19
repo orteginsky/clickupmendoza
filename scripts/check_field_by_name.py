@@ -8,7 +8,7 @@ load_dotenv()
 # --- CONFIGURACIÓN ---
 API_TOKEN = os.getenv("CLICKUP_API_TOKEN")
 # Usamos el ID de la Lista X que me diste en el prompt
-LIST_ID_X = "901407053200" 
+LIST_ID_X = "901408675105" 
 FIELD_TARGET_ID = "Link Intake" # El ID que tienes en tu .env
 
 # Tu URL de ngrok/Cloud Run
