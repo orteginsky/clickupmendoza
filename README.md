@@ -1,18 +1,28 @@
-# Nexus Legal Integration v2.2
+# Nexus Legal Integration v2.2.1
 
-Middleware de integración entre ClickUp, Cloud SQL (PostgreSQL) y servicios externos (Filtros IA) con API para búsqueda fuzzy, sincronización de datos y procesamiento inteligente de leads.
+Middleware de integración entre ClickUp, Cloud SQL (PostgreSQL) y servicios externos (Filtros IA) con API para búsqueda fuzzy, sincronización de datos y procesamiento inteligente de leads. Soporta múltiples listas de ClickUp de forma independiente.
 
 ## Arquitectura
 
 ```
-ClickUp API/Webhooks → FastAPI (Cloud Run) → Cloud SQL PostgreSQL → API Consumers (MCP/Sheets)
-                              ↓
-                    Enqueuer (Cloud Tasks) → Filtros IA → Callback → ClickUp Update
+ClickUp API/Webhooks
+    │
+    ├── /webhooks/clickup       (CONSULTAS AGENDA)
+    │       └── LeadService → leads_cache → Enqueuer → Filtros IA
+    │                                   └── Google Sheets
+    │
+    └── /webhooks/assignments   (CASE ASSIGNMENT)
+            └── AssignmentService → case_assignments
+
+Filtros IA → /callbacks/filtros → ClickUp Update (AI Link field)
+
+API Consumers (MCP / Google Sheets / externos)
+    └── GET /leads/search, /leads/{id}, /leads/mycase/{id}
 ```
 
 **Componentes principales:**
 
-- **FastAPI**: API REST con endpoints de webhook y búsqueda
+- **FastAPI**: API REST con endpoints de webhook, búsqueda y callbacks
 - **Cloud SQL**: PostgreSQL con extensión `pg_trgm` para búsqueda fuzzy
 - **Cloud Run**: Hosting serverless (scale-to-zero)
 - **Secret Manager**: Gestión de credenciales
@@ -24,9 +34,11 @@ ClickUp API/Webhooks → FastAPI (Cloud Run) → Cloud SQL PostgreSQL → API Co
 - **Python 3.11+**
 - **FastAPI** (framework web)
 - **SQLAlchemy** (ORM)
+- **httpx** (cliente HTTP async)
 - **PostgreSQL 15** con `pg_trgm`
 - **Google Cloud Run** (hosting)
 - **Alembic** (migraciones de DB)
+- **gspread + google-auth** (integración Google Sheets)
 
 ## Estructura del Proyecto
 
@@ -34,31 +46,47 @@ ClickUp API/Webhooks → FastAPI (Cloud Run) → Cloud SQL PostgreSQL → API Co
 clickupmendoza/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py              # Aplicación FastAPI principal
-│   ├── config.py            # Configuración (Pydantic Settings)
-│   ├── database.py          # Conexión a DB
-│   ├── models/              # Modelos SQLAlchemy
-│   │   └── lead.py
-│   ├── schemas/             # Schemas Pydantic (request/response)
-│   │   ├── lead.py
-│   │   └── webhook.py
-│   ├── core/                # Lógica de parsing y normalización
-│   │   ├── parser.py        # Extrae campos de task_content
-│   │   ├── normalizer.py    # Normaliza nombres para búsqueda
-│   │   └── text_utils.py    # Utilidades de texto
-│   ├── repositories/        # Patrón Repository (acceso a datos)
-│   │   └── lead_repository.py
-│   ├── services/            # Lógica de negocio
-│   │   ├── clickup_service.py
-│   │   └── lead_service.py
-│   └── api/                 # Endpoints FastAPI
-│       ├── webhooks.py      # POST /webhooks/clickup
-│       └── leads.py         # GET /leads/search, etc.
-├── alembic/                 # Migraciones de base de datos
+│   ├── main.py                      # Aplicación FastAPI principal (v2.2.1)
+│   ├── config.py                    # Configuración (Pydantic Settings)
+│   ├── database.py                  # Conexión a DB
+│   ├── models/                      # Modelos SQLAlchemy
+│   │   ├── lead.py                  # Tabla leads_cache (CONSULTAS AGENDA)
+│   │   └── case_assignment.py       # Tabla case_assignments (CASE ASSIGNMENT)
+│   ├── schemas/                     # Schemas Pydantic (request/response)
+│   │   ├── lead.py                  # LeadResponse, LeadSearchResponse
+│   │   ├── webhook.py               # Payload genérico de webhook
+│   │   ├── case_assignment.py       # CaseAssignmentWebhook, CaseAssignmentResponse
+│   │   └── filtros.py               # FiltrosCallbackPayload (respuesta de Filtros IA)
+│   ├── core/                        # Lógica de parsing y normalización
+│   │   ├── parser.py                # Extrae campos de task_content (regex)
+│   │   ├── normalizer.py            # Normaliza nombres para búsqueda
+│   │   └── text_utils.py            # Utilidades de texto (teléfonos, fechas)
+│   ├── repositories/                # Patrón Repository (acceso a datos)
+│   │   ├── lead_repository.py       # CRUD + búsqueda fuzzy para leads
+│   │   └── assignment_repository.py # Upsert para case_assignments
+│   ├── services/                    # Lógica de negocio
+│   │   ├── clickup_service.py       # ClickUp API (GET task, POST field, verify)
+│   │   ├── lead_service.py          # Transforma task → LeadsCache
+│   │   ├── assignment_service.py    # Transforma task → CaseAssignment (21 campos)
+│   │   └── sheets_service.py        # Integración Google Sheets
+│   └── api/                         # Endpoints FastAPI
+│       ├── webhooks.py              # POST /webhooks/clickup (CONSULTAS AGENDA)
+│       ├── webhook_assignments.py   # POST /webhooks/assignments (CASE ASSIGNMENT)
+│       ├── callbacks.py             # POST /callbacks/filtros (Filtros IA)
+│       └── leads.py                 # GET /leads/search, /leads/{id}, etc.
+├── alembic/                         # Migraciones de base de datos
 │   ├── env.py
 │   └── versions/
 ├── scripts/
-│   └── init_db.py           # Script de inicialización de DB
+│   ├── init_db.py                   # Inicializa leads_cache + pg_trgm
+│   ├── init_db_ca.py                # Inicializa case_assignments
+│   ├── import_history.py            # Carga datos históricos de leads
+│   ├── import_case_assignments.py   # Carga datos históricos de assignments
+│   ├── register_webhook.py          # Registra webhook CONSULTAS AGENDA en ClickUp
+│   └── register_webhook_assignments.py # Registra webhook CASE ASSIGNMENT en ClickUp
+├── tests/
+│   ├── test_webhook.py
+│   └── test_assignment_webhook.py
 ├── requirements.txt
 ├── Dockerfile
 ├── cloudbuild.yaml
@@ -104,16 +132,20 @@ nano .env
 
 **Variables críticas:**
 - `CLICKUP_API_TOKEN`: Token de API de ClickUp
-- `CLICKUP_WEBHOOK_SECRET`: Secret para validar webhooks
+- `CLICKUP_WEBHOOK_SECRET`: Secret para validar webhooks de CONSULTAS AGENDA
+- `CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS`: Secret para validar webhooks de CASE ASSIGNMENT
 - `DATABASE_URL`: Connection string de PostgreSQL
 
 ### 5. Inicializar base de datos
 
 ```bash
-# Opción 1: Script de inicialización (recomendado para primera vez)
+# Inicializar tabla leads (CONSULTAS AGENDA)
 python scripts/init_db.py
 
-# Opción 2: Usar Alembic
+# Inicializar tabla case_assignments (CASE ASSIGNMENT)
+python scripts/init_db_ca.py
+
+# Opcional: usar Alembic
 alembic upgrade head
 ```
 
@@ -121,6 +153,8 @@ El script `init_db.py` hace:
 1. Habilita extensión `pg_trgm`
 2. Crea tabla `leads_cache`
 3. Crea índice GIN para búsqueda fuzzy
+
+El script `init_db_ca.py` crea la tabla `case_assignments` con sus 21+ campos personalizados.
 
 ### 6. Ejecutar localmente
 
@@ -171,6 +205,7 @@ gcloud sql users create dbuser \
 # Crear secrets
 echo -n "pk_YOUR_CLICKUP_TOKEN" | gcloud secrets create CLICKUP_API_TOKEN --data-file=-
 echo -n "your_webhook_secret" | gcloud secrets create CLICKUP_WEBHOOK_SECRET --data-file=-
+echo -n "your_assignments_secret" | gcloud secrets create CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS --data-file=-
 echo -n "postgresql://user:pass@host/db" | gcloud secrets create DATABASE_URL --data-file=-
 ```
 
@@ -197,18 +232,53 @@ gcloud run deploy nexus-legal-api \
 ### Health Check
 
 ```
-GET /
-GET /health
+GET /          → status, versión, entorno
+GET /health    → {"status": "ok"}
 ```
 
-### Webhooks
+### Webhooks ClickUp
 
 **POST /webhooks/clickup**
 
-Recibe eventos de ClickUp (taskUpdated, taskCreated).
+Recibe eventos de la lista **CONSULTAS AGENDA** (taskUpdated, taskCreated).
 
-Headers requeridos:
-- `X-Signature`: Firma del webhook
+- Verifica firma HMAC-SHA256 (`X-Signature`)
+- Guarda lead en `leads_cache`
+- Dispara en background: Enqueuer (Filtros IA) + Google Sheets
+- Protección anti-bucle via campo `AI Link`
+
+**POST /webhooks/assignments**
+
+Recibe eventos de la lista **CASE ASSIGNMENT**.
+
+- Verifica firma con secret independiente
+- Mapea 21 custom fields via ID_MAP
+- Guarda en tabla `case_assignments`
+
+### Callbacks
+
+**POST /callbacks/filtros**
+
+Recibe respuesta del microservicio Filtros IA.
+
+Payload esperado:
+```json
+{
+  "task_id": "abc123",
+  "status": "success",
+  "outcome": "viable",
+  "artifacts": {
+    "doc_id": "...",
+    "doc_url": "https://..."
+  },
+  "diagnostics": {
+    "processing_time_ms": 1200,
+    "version": "1.0"
+  }
+}
+```
+
+Al recibir éxito, actualiza el campo `AI Link` en ClickUp con la URL del documento.
 
 ### Búsqueda de Leads
 
@@ -232,15 +302,33 @@ Obtiene un lead por MyCase ID (8 dígitos).
 
 Lista todos los leads con paginación.
 
-## Configurar Webhook en ClickUp
+## Configurar Webhooks en ClickUp
+
+### CONSULTAS AGENDA
 
 1. Ir a ClickUp → Settings → Integrations → Webhooks
 2. Crear nuevo webhook:
    - **URL**: `https://YOUR-CLOUD-RUN-URL/webhooks/clickup`
    - **Events**: Task Updated, Task Created
    - **Secret**: (mismo que `CLICKUP_WEBHOOK_SECRET`)
+3. O usar el script: `python scripts/register_webhook.py`
 
-## Lógica de Parsing
+### CASE ASSIGNMENT
+
+1. Crear otro webhook:
+   - **URL**: `https://YOUR-CLOUD-RUN-URL/webhooks/assignments`
+   - **Events**: Task Updated, Task Created
+   - **Secret**: (mismo que `CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS`)
+2. O usar el script: `python scripts/register_webhook_assignments.py`
+
+## Listas Soportadas
+
+| Lista | Webhook | Tabla DB | Campos |
+|-------|---------|----------|--------|
+| CONSULTAS AGENDA | `/webhooks/clickup` | `leads_cache` | ~40 campos + búsqueda fuzzy |
+| CASE ASSIGNMENT | `/webhooks/assignments` | `case_assignments` | 21 custom fields mapeados |
+
+## Lógica de Parsing (CONSULTAS AGENDA)
 
 El sistema extrae información de dos fuentes:
 
@@ -277,6 +365,21 @@ Other result of interview (optional):
 - Extrae solo dígitos
 - Valida longitud (10-15)
 - Descarta si no cumple
+
+## Mapeo de Campos (CASE ASSIGNMENT)
+
+El servicio `AssignmentService` usa un `ID_MAP` que traduce 21 UUIDs de custom fields de ClickUp a columnas de la tabla `case_assignments`:
+
+```python
+ID_MAP = {
+    "298c4ec5-...": "abogado_asignado",
+    "a1c9d406-...": "proyecto",
+    "a42586d8-...": "label_type",
+    # ... 18 campos más
+}
+```
+
+Campos incluidos: `abogado_asignado`, `proyecto`, `label_type`, `case_review_status`, `open_case_type`, `rapsheet_status`, `link_audio_cr`, `link_google_meet`, `cr_done_date`, `fecha_asignacion`, entre otros.
 
 ## Búsqueda Fuzzy (pg_trgm)
 
@@ -332,23 +435,32 @@ Acceder en: [Cloud Console → Cloud Run → Metrics](https://console.cloud.goog
 ## Seguridad
 
 - **HTTPS/TLS**: Todo el tráfico es encriptado
-- **Validación de webhooks**: Firma HMAC verificada
+- **Validación de webhooks**: Firma HMAC-SHA256 verificada por endpoint
+- **Secrets independientes**: Cada lista tiene su propio webhook secret
 - **Secrets Manager**: Credenciales nunca en código
 - **Cloud SQL**: Encriptación en reposo por default
 - **IAM**: Control de acceso granular
 
-## Nuevas Funcionalidades (v2.2) ✨
+## Historial de Versiones
 
-### Versión 2.2 (Enero 2026)
+### Versión 2.2.1 (Febrero 2026)
+- [x] **Soporte Multi-Lista**: Dos listas de ClickUp operando de forma independiente
+- [x] **CASE ASSIGNMENT**: Nuevo webhook, modelo y servicio para lista de asignaciones
+- [x] **21 Custom Fields**: Mapeo completo de campos personalizados para CASE ASSIGNMENT
+- [x] **Scripts de inicialización**: `init_db_ca.py`, `import_case_assignments.py`, `register_webhook_assignments.py`
+- [x] **Webhook secret independiente**: Cada lista valida con su propio secret
+
+### Versión 2.2.0 (Enero 2026)
 - [x] **Integración con Filtros IA (FIA)**: Envío automático de leads al microservicio de filtros inteligentes via Enqueuer
 - [x] **Procesamiento en Background**: Tareas pesadas (dispatch, sheets) ejecutadas en segundo plano para respuesta rápida a ClickUp
 - [x] **Protección contra Bucles**: Verificación de campo `AI Link` para evitar reprocesamiento
 - [x] **Lista Optimizada**: Configuración para lista "CONSULTAS AGENDA" como fuente principal
-- [x] **Callback URL**: Soporte para recibir respuestas del servicio de Filtros IA
+- [x] **Callback URL**: Endpoint `/callbacks/filtros` para recibir respuestas del servicio de Filtros IA
+- [x] **set_custom_field_value**: Actualización de campos en ClickUp desde callbacks
 
 ### Versión 2.1
 - [x] **Integración con Google Sheets**: Sincronización automática vía Service Account
-- [x] **External Dispatch**: Notificación HTTP a servicios externos
+- [x] **External Dispatch**: Notificación HTTP a servicios externos (Enqueuer)
 - [x] **Trigger Condicional**: Acciones basadas en campo "Link Intake"
 - [x] **Filtrado por Lista**: Webhooks específicos para lista configurada
 
@@ -357,7 +469,7 @@ Ver [INTEGRATION_SETUP.md](INTEGRATION_SETUP.md) para instrucciones detalladas.
 ## Roadmap (Próximas Mejoras)
 
 - [ ] Job nocturno con Cloud Scheduler (safety net)
-- [ ] Extracción de comentarios de ClickUp
+- [ ] Extracción y almacenamiento del último comentario de tarea
 - [ ] Exportación de datos (CSV, Excel)
 - [ ] Dashboard de métricas (Looker Studio)
 - [ ] Retry logic para dispatch fallido
@@ -368,12 +480,12 @@ Para issues o preguntas, contactar al equipo de desarrollo.
 
 ---
 
-**Versión:** 2.2.0
-**Última actualización:** 2026-01-23
+**Versión:** 2.2.1
+**Última actualización:** 2026-02-19
 
 ## Documentación Adicional
 
 - [INTEGRATION_SETUP.md](INTEGRATION_SETUP.md) - Guía de configuración de Google Sheets y External Dispatch
 - [VARIABLES_DE_ENTORNO.md](VARIABLES_DE_ENTORNO.md) - Referencia completa de variables de entorno
-- [RESUMEN_IMPLEMENTACION.md](RESUMEN_IMPLEMENTACION.md) - Resumen técnico de la implementación v2.1
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Arquitectura técnica detallada
 - [CHANGELOG.md](CHANGELOG.md) - Registro de cambios por versión

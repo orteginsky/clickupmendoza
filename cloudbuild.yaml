@@ -15,12 +15,15 @@ steps:
       - '--region=us-central1'
       - '--service-account=drive-sheets@ortega-473114.iam.gserviceaccount.com'
       - '--add-cloudsql-instances=ortega-473114:us-central1:nexus-legal-db'
-      # Cambio de flag aquí: de --use-startup-cpu-boost a --cpu-boost
-      - '--cpu-boost' 
-      - '--set-env-vars=GUNICORN_CMD_ARGS=--timeout 90 --workers 2 --threads 4,APP_ENV=production,LOG_LEVEL=INFO,EXTERNAL_DISPATCH_ENABLED=true,EXTERNAL_DISPATCH_URL=https://enqueuer-api-907757756276.us-central1.run.app/enqueue'
-      - '--set-secrets=CLICKUP_API_TOKEN=CLICKUP_API_TOKEN:latest,CLICKUP_WEBHOOK_SECRET=CLICKUP_WEBHOOK_SECRET:latest,CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS=CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS:latest,FILTROS_API_KEY=FILTROS_API_KEY:latest'
-      - '--memory=2Gi'
+      - '--cpu-boost'
+      - '--memory=4Gi'
       - '--cpu=1'
+      # Secrets desde GCP Secret Manager (valores sensibles nunca en código)
+      - '--set-secrets=CLICKUP_API_TOKEN=CLICKUP_API_TOKEN:latest,CLICKUP_WEBHOOK_SECRET=CLICKUP_WEBHOOK_SECRET:latest,CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS=CLICKUP_WEBHOOK_SECRET_ASSIGNMENTS:latest,FILTROS_API_KEY=FILTROS_API_KEY:latest,DATABASE_PASSWORD=NEXUS_LEGAL_DATABASE_PASSWORD:latest'
+      # Variables de entorno no-sensibles.
+      # Se usa ^##^ como delimitador en lugar de coma para permitir
+      # valores con comas (como JSON en GOOGLE_SHEETS_FIELD_MAPPING).
+      - '--set-env-vars=^##^GUNICORN_CMD_ARGS=--timeout 90 --workers 2 --threads 4##APP_ENV=production##LOG_LEVEL=INFO##DATABASE_HOST=/cloudsql/ortega-473114:us-central1:nexus-legal-db##DATABASE_PORT=5432##DATABASE_NAME=nexus_legal_db##DATABASE_USER=nexus_user##DATABASE_SSL_MODE=disable##CLICKUP_LIST_ID=901403238634##CLICKUP_FIELD_ID_AI_LINK=3aa46502-0763-42d3-8cb9-71513566e3ae##CLICKUP_FIELD_ID_LINK_INTAKE=1c35f9be-9fe2-4a0c-b0af-9f4f92dd4554##EXTERNAL_DISPATCH_ENABLED=true##EXTERNAL_DISPATCH_URL=https://enqueuer-api-907757756276.us-central1.run.app/enqueue##EXTERNAL_DISPATCH_CALLBACK_BASE_URL=https://nexus-legal-api-223080314602.us-central1.run.app##GOOGLE_SHEETS_ENABLED=true##GOOGLE_SHEETS_SPREADSHEET_ID=161uBv2YTWOiR-82zlsf6ANbiqtfiow8B4x62VXCTPwU##GOOGLE_SHEETS_SHEET_NAME=Leads DVS##GOOGLE_SHEETS_FIELD_MAPPING={"task_id": 1, "task_name": 2, "status": 3, "name": 4, "dvs_name": 5, "link_intake": 6, "url": 7, "date_created": 8, "date_updated": 9}'
 
 images:
   - 'gcr.io/$PROJECT_ID/nexus-legal-api:$BUILD_ID'

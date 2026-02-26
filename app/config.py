@@ -1,7 +1,12 @@
-#app/config.py
+# app/config.py
 """
 Configuración centralizada usando Pydantic Settings.
-Lee desde variables de entorno o .env
+Lee desde variables de entorno (Cloud Run) o archivo .env (desarrollo local).
+
+IMPORTANTE: Este archivo no debe contener valores reales de producción.
+- Secrets (tokens, passwords, webhook secrets) → GCP Secret Manager
+- Config no-sensible (IDs, URLs, flags) → variables de entorno en cloudbuild.yaml
+- Desarrollo local → archivo .env (ignorado por git)
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,38 +24,38 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # ClickUp
-    clickup_api_token: str = "pk_88282073_3EL5TAYA7G4VB5W7AFXXRD9PE3K231J0"
+    # ClickUp — tokens y secrets vienen de Secret Manager
+    clickup_api_token: str
     clickup_webhook_secret: str
+    clickup_webhook_secret_assignments: str
     clickup_team_id: Optional[str] = None
-    clickup_list_id: Optional[str] = "901403238634"
+    clickup_list_id: Optional[str] = None
     clickup_trigger_condicional: Optional[str] = None
-    clickup_field_id_ai_link: Optional[str] = "3aa46502-0763-42d3-8cb9-71513566e3ae"
-    clickup_webhook_secret_assignments: str = "10VI1B1T82MO55WX9KRQTEOG1XLZYDTM2PDCIYW8HT1LGTYFY1FNY7796K0P5P6V"
-    clickup_field_id_link_intake: str = "1c35f9be-9fe2-4a0c-b0af-9f4f92dd4554"
-    
-    # Database
-    database_host: str = "/cloudsql/ortega-473114:us-central1:nexus-legal-db"
+    clickup_field_id_ai_link: Optional[str] = None
+    clickup_field_id_link_intake: Optional[str] = None
+
+    # Database — password viene de Secret Manager
+    database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "nexus_legal_db"
-    database_user: str = "nexus_user"
-    database_password: str = "nr5EPzU1fDQph1Kb*"
+    database_user: str = "postgres"
+    database_password: str
     database_url: Optional[str] = None
     database_ssl_mode: str = "disable"
 
     # Google Sheets
     google_sheets_enabled: bool = True
-    google_sheets_spreadsheet_id: Optional[str] = "161uBv2YTWOiR-82zlsf6ANbiqtfiow8B4x62VXCTPwU"
+    google_sheets_spreadsheet_id: Optional[str] = None
     google_sheets_sheet_name: str = "Leads DVS"
     google_sheets_credentials_path: Optional[str] = None
     google_sheets_credentials_json: Optional[str] = None
-    google_sheets_field_mapping: Optional[str] = '{"task_id": 1, "task_name": 2, "status": 3, "name": 4, "dvs_name": 5, "link_intake": 6, "url": 7, "date_created": 8, "date_updated": 9}'
+    google_sheets_field_mapping: Optional[str] = None
 
-    # External Dispatch (HTTP POST on webhook trigger)
+    # External Dispatch (Enqueuer + Filtros IA)
     external_dispatch_enabled: bool = True
-    external_dispatch_url: Optional[str] = "https://enqueuer-api-907757756276.us-central1.run.app/enqueue"
-    filtros_api_key: Optional[str] = "tu-api-key-real"
-    external_dispatch_callback_base_url: Optional[str] = "https://nexus-legal-api-223080314602.us-central1.run.app"
+    external_dispatch_url: Optional[str] = None
+    filtros_api_key: Optional[str] = None
+    external_dispatch_callback_base_url: Optional[str] = None
 
     # Application
     app_env: str = "production"
@@ -75,14 +80,14 @@ class Settings(BaseSettings):
                 f"postgresql://{self.database_user}:{self.database_password}"
                 f"@/{self.database_name}?host={self.database_host}"
             )
-        
+
         # Si estamos en local (IP/localhost)
         return (
             f"postgresql://{self.database_user}:{self.database_password}"
             f"@{self.database_host}:{self.database_port}/{self.database_name}"
             f"?sslmode={self.database_ssl_mode}"
         )
-    
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Convierte CORS_ORIGINS en lista"""
@@ -107,7 +112,7 @@ class Settings(BaseSettings):
     def sheets_field_mapping_dict(self) -> dict:
         """
         Convierte el mapeo de campos JSON a diccionario.
-        Formato esperado: {"task_name": 1, "phone": 2, "email": 3}
+        Formato esperado: {"campo_task": numero_columna}
         """
         if self.google_sheets_field_mapping:
             try:

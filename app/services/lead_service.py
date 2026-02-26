@@ -153,7 +153,9 @@ class LeadService:
         """
         Extrae custom fields de ClickUp.
 
-        Mapea nombres de custom fields a columnas de la DB.
+        Mapea IDs de custom fields a columnas de la DB.
+        Usar IDs en lugar de nombres garantiza que los cambios de nombre
+        en ClickUp no rompan el mapeo.
 
         Args:
             custom_fields: Lista de custom fields de ClickUp
@@ -163,19 +165,18 @@ class LeadService:
         """
         result = {}
 
-        # Mapeo de nombres de custom fields a columnas
-        field_mapping = {
-            "Pipeline de Viabilidad": "pipeline_de_viabilidad",
-            "Fecha Consulta Original": "fecha_consulta_original",
-            "TIS Open": "tis_open",
+        # Mapeo de IDs de custom fields (CONSULTAS AGENDA) a columnas de la DB
+        ID_MAP = {
+            "dd57d3cb-8d30-491a-b269-f5b8e23a9da8": "pipeline_de_viabilidad",
+            "0e06e00d-2d08-4cb1-a662-66c390de105d": "fecha_consulta_original",
         }
 
         for field in custom_fields:
-            field_name = field.get("name")
+            field_id = field.get("id")
             field_value = field.get("value")
 
-            if field_name in field_mapping:
-                column_name = field_mapping[field_name]
+            if field_id in ID_MAP:
+                column_name = ID_MAP[field_id]
 
                 # Parsear según tipo
                 field_type = field.get("type")

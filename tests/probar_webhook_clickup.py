@@ -12,7 +12,7 @@ load_dotenv()
 # 1. Obtenemos el secreto del .env
 WEBHOOK_SECRET = os.getenv("CLICKUP_WEBHOOK_SECRET")
 
-# 2. Usamos la URL CORTA (la que funcionó en tu curl)
+# 2. Usamos la URL CORTA (la que funcionó en tu curl)1
 #    Esta URL suele ser más estable para el enrutamiento inmediato
 URL_DESTINO = "https://nexus-legal-api-pahip4iobq-uc.a.run.app/webhooks/clickup"
 
