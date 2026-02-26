@@ -7,8 +7,7 @@ load_dotenv()
 
 # Configuración
 CLICKUP_API_TOKEN = os.getenv("CLICKUP_API_TOKEN")
-# El ID que me proporcionaste:
-WEBHOOK_ID_TO_DELETE = "a1e19a1b-6374-4b04-8d17-c429d642d692"
+WEBHOOK_ID_TO_DELETE = "6138cccd-04b5-4355-80aa-ee25595e4006"
 
 def delete_specific_webhook():
     if not CLICKUP_API_TOKEN:

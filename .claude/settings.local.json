@@ -4,7 +4,14 @@
       "Bash(chmod:*)",
       "Bash(tree:*)",
       "Bash(wc:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(cd:*)",
+      "Bash(git rm:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(gcloud builds:*)",
+      "Bash(curl:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

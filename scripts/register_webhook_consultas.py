@@ -8,7 +8,7 @@ load_dotenv()
 
 # Configuración
 CLICKUP_API_TOKEN = os.getenv("CLICKUP_API_TOKEN")
-CLICKUP_LIST_ID = ""
+CLICKUP_LIST_ID = "901403238634"
 # NOTA: Cambia esto si tu URL de ngrok cambió
 WEBHOOK_URL = "https://nexus-legal-api-223080314602.us-central1.run.app/webhooks/clickup"
 
