@@ -1,4 +1,4 @@
-# Nexus Legal Integration v2.2.1
+# Nexus Legal Integration v2.3.0
 
 Middleware de integración entre ClickUp, Cloud SQL (PostgreSQL) y servicios externos (Filtros IA) con API para búsqueda fuzzy, sincronización de datos y procesamiento inteligente de leads. Soporta múltiples listas de ClickUp de forma independiente.
 
@@ -46,7 +46,7 @@ API Consumers (MCP / Google Sheets / externos)
 clickupmendoza/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py                      # Aplicación FastAPI principal (v2.2.1)
+│   ├── main.py                      # Aplicación FastAPI principal (v2.3.0)
 │   ├── config.py                    # Configuración (Pydantic Settings)
 │   ├── database.py                  # Conexión a DB
 │   ├── models/                      # Modelos SQLAlchemy
@@ -267,6 +267,7 @@ Payload esperado:
   "task_id": "abc123",
   "status": "success",
   "outcome": "viable",
+  "first_outcome": "POTENTIAL VAWA",
   "artifacts": {
     "doc_id": "...",
     "doc_url": "https://..."
@@ -278,7 +279,37 @@ Payload esperado:
 }
 ```
 
-Al recibir éxito, actualiza el campo `AI Link` en ClickUp con la URL del documento.
+Al recibir éxito, actualiza los siguientes campos en ClickUp:
+
+| Campo ClickUp | Tipo | Campo payload | Obligatorio |
+|---|---|---|---|
+| Link AI Filtro | `url` | `artifacts.doc_url` | Sí |
+| 1st Outcome | `drop_down` | `first_outcome` | No |
+
+**Valores válidos para `first_outcome`:**
+
+| Etiqueta | UUID de opción |
+|---|---|
+| `DENIED` | `53e46014-6add-4b02-9afa-f90f2e158ec1` |
+| `N/Q - TS` | `60eaca67-5a9c-4620-bd93-4afc19b46b6e` |
+| `NO INFO/SOLO QUEST` | `efda53a6-acc4-44e7-88c2-9b511aa6f518` |
+| `NON VAWA` | `c4516db1-a473-4603-919e-e1f47af5b846` |
+| `NQ - FORCED LABOR` | `ed5f8ef1-e81d-47f0-80b0-ca2aecd55961` |
+| `NQ - GMC` | `06c87578-65d7-42af-b9b6-e019f36e0828` |
+| `NQ - VAWA/VISA T` | `174ae76a-fb7e-47aa-a54e-bd1a649a78dd` |
+| `NQ - VISA U` | `0c3c2a4c-83c2-4012-b2a8-8891bd784729` |
+| `NQ-NOT QAL RELATION` | `8c98f179-ef5b-4b82-baf3-edb8d42d05c8` |
+| `Pass` | `94dcc461-ee3c-4b07-9afa-a203344e8352` |
+| `POSSIBLE NON VAWA` | `64433fb2-b60b-4f43-9a06-6c463f9c1755` |
+| `POTENTIAL VAWA` | `77c293fc-f305-42f0-924d-f1345bac054d` |
+| `POTENTIAN VISA T` | `199e41b1-9d64-4f18-8e8c-e8afd17d6b72` |
+| `Reactivation` | `544e383e-3f39-4d75-ba4c-1d343e6680fb` |
+| `REESCREENING` | `8511a7e2-4354-435f-ad13-1f006a3aa594` |
+| `VAWA - NEA` | `f09c6265-61f8-40fa-a42d-687f6849255b` |
+| `VAWA SPOUSE` | `06ea9e6f-150b-42cd-b840-9c58051d9662` |
+| `VISA U` | `dbff9536-51a0-4d5a-924d-26eda89bce99` |
+
+> Si `first_outcome` no se incluye en el payload, solo se actualiza el campo `Link AI Filtro`. Si se incluye un valor inválido, la API retorna `422 Unprocessable Entity`.
 
 ### Búsqueda de Leads
 
@@ -443,6 +474,12 @@ Acceder en: [Cloud Console → Cloud Run → Metrics](https://console.cloud.goog
 
 ## Historial de Versiones
 
+### Versión 2.3.0 (Marzo 2026)
+- [x] **Campo 1st Outcome en callback**: El endpoint `/callbacks/filtros` ahora acepta opcionalmente el campo `first_outcome` (drop_down) para actualizar el resultado de la clasificación directamente en ClickUp
+- [x] **Mapeo de opciones drop_down**: 18 valores válidos mapeados a UUIDs de opción de ClickUp en `FIRST_OUTCOME_OPTIONS`
+- [x] **Validación automática**: Pydantic rechaza con `422` cualquier `first_outcome` que no esté en el catálogo definido
+- [x] **Actualización no bloqueante**: Si el campo `1st Outcome` falla, el callback retorna éxito igual (el link principal ya fue guardado)
+
 ### Versión 2.2.1 (Febrero 2026)
 - [x] **Soporte Multi-Lista**: Dos listas de ClickUp operando de forma independiente
 - [x] **CASE ASSIGNMENT**: Nuevo webhook, modelo y servicio para lista de asignaciones
@@ -480,8 +517,8 @@ Para issues o preguntas, contactar al equipo de desarrollo.
 
 ---
 
-**Versión:** 2.2.1
-**Última actualización:** 2026-02-19
+**Versión:** 2.3.0
+**Última actualización:** 2026-03-03
 
 ## Documentación Adicional
 
