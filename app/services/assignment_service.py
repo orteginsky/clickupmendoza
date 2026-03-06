@@ -198,8 +198,9 @@ class AssignmentService:
 
         # Procesar Asignados (Unir múltiples nombres en un string)
         assignees = task_data.get("assignees", [])
-        if assignees:
-            result["assignee"] = ", ".join([a.get("username", "") for a in assignees])
+        result["assignee"] = ", ".join(
+            filter(None, [a.get("username") or a.get("email", "") for a in assignees])
+        ) or None
             
         custom_fields = task_data.get("custom_fields", [])
         for field in custom_fields:
