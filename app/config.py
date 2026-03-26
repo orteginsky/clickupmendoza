@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Security
     encryption_key: Optional[str] = None
 
+    # Drive Sync
+    drive_sync_secret: Optional[str] = None    # Bearer token para autenticar llamadas desde AppScript
+
     @property
     def database_dsn(self) -> str:
         """Construye la URL de conexión a la DB"""

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.api import webhooks, leads, callbacks, webhook_assignments
+from app.api import webhooks, leads, callbacks, webhook_assignments, drive_sync
 
 # ============================================================================
 # Lifespan Event Handler (Reemplaza a on_event)
@@ -27,10 +27,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Nexus Legal Integration API",
     description="Middleware de integración ClickUp → Cloud SQL + API (MCP/Search)",
-    version="2.2.1", # Incrementamos versión por la nueva lista
+    version="2.2.1",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan # Registramos el lifespan aquí
+    lifespan=lifespan
 )
 
 # CORS Configuration
@@ -54,6 +54,9 @@ app.include_router(webhook_assignments.router)
 
 # Callbacks e IA
 app.include_router(callbacks.router, prefix="/callbacks", tags=["Callbacks"])
+
+# Drive Sync
+app.include_router(drive_sync.router)
 
 # ============================================================================
 # Health Check
