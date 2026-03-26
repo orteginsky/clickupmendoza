@@ -38,74 +38,94 @@ async def clickup_webhook(
 
     clickup_service = ClickUpService()
     if not clickup_service.verify_webhook_signature(body_text, x_signature or ""):
+        logger.warning("webhook_clickup | firma inválida rechazada")
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
 
     try:
         payload = await request.json()
     except Exception as e:
+        logger.error("webhook_clickup | JSON inválido: %s", e)
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     event = payload.get("event")
     task_id = payload.get("task_id")
 
+    logger.info("webhook_clickup | event=%s task_id=%s", event, task_id)
+
     if not task_id:
+        logger.warning("webhook_clickup | payload sin task_id, ignorado")
         raise HTTPException(status_code=400, detail="Missing task_id")
 
     # Solo procesar updates/creates
     if event not in ["taskUpdated", "taskCreated"]:
+        logger.info("webhook_clickup | event=%s ignorado (no es update/create)", event)
         return {"status": "ignored", "event": event}
 
-    # 2. Obtener datos básicos de la tarea (Esto es rápido)
+    # 2. Obtener datos básicos de la tarea
+    logger.info("webhook_clickup | consultando ClickUp API para task_id=%s", task_id)
     task_data = await clickup_service.get_task(task_id)
     if not task_data:
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
-    
+        # Devolvemos 200 para que ClickUp no cuente esto como fallo del webhook.
+        # La tarea puede haber sido eliminada o ser inaccesible temporalmente.
+        logger.warning(
+            "webhook_clickup | task_id=%s no encontrada en ClickUp API, ignorando", task_id
+        )
+        return {"status": "ignored", "reason": "task_not_found", "task_id": task_id}
+
     # 3. Lógica del Trigger
     link_intake_value = None
     custom_fields = task_data.get("custom_fields", [])
-
     ai_link_exists = False
-    
+
     for field in custom_fields:
         field_id = field.get("id")
-        
+
         # Detectar el Trigger (Link Intake)
         if field_id == settings.clickup_field_id_link_intake:
             link_intake_value = field.get("value")
-            
+
         # Detectar Protección contra bucles (AI Link)
         if field_id == settings.clickup_field_id_ai_link:
-            if field.get("value"): 
+            if field.get("value"):
                 ai_link_exists = True
-    
+
     if ai_link_exists:
-         logger.info(f"Task {task_id} ya tiene Link AI generado. Ignorando para evitar bucle.")
-         return {"status": "ignored", "reason": "already_processed"}
+        logger.info(
+            "webhook_clickup | task_id=%s ya tiene Link AI, ignorado para evitar bucle", task_id
+        )
+        return {"status": "ignored", "reason": "already_processed"}
 
     # 4. Encolar tareas en Background (Fire and Forget)
     if link_intake_value:
-        logger.info(f"⚡ Encolando procesamiento background para Task {task_id}")
-        
+        logger.info(
+            "webhook_clickup | task_id=%s tiene Link Intake, encolando background tasks", task_id
+        )
+
         # Encolamos el Dispatch a Filtros
         if settings.external_dispatch_enabled and settings.external_dispatch_url:
             background_tasks.add_task(
-                _dispatch_to_external_service, 
-                task_id, 
-                task_data, 
+                _dispatch_to_external_service,
+                task_id,
+                task_data,
                 link_intake_value
             )
-        
+
         # Encolamos Sheets Sync
         if settings.google_sheets_enabled:
             background_tasks.add_task(
-                _sync_to_google_sheets, 
+                _sync_to_google_sheets,
                 task_data
             )
+    else:
+        logger.info(
+            "webhook_clickup | task_id=%s sin Link Intake, solo se guarda en DB", task_id
+        )
 
     # 5. Guardar en DB Local (Rápido)
     lead_data = LeadService.transform_clickup_task(task_data)
     repo = LeadRepository(db)
-    lead = repo.upsert(lead_data)
+    repo.upsert(lead_data)
+    logger.info("webhook_clickup | task_id=%s guardado en DB", task_id)
 
     # RESPONDER A CLICKUP INMEDIATAMENTE
     return {"status": "queued", "task_id": task_id}
@@ -115,13 +135,12 @@ async def _dispatch_to_external_service(task_id: str, task_data: dict, link_inta
     """
     Envía la solicitud al ENQUEUER (Cloud Tasks Wrapper).
     """
-    logger.info(f"🚀 [Background] Preparando envío al Enqueuer para Task {task_id}")
-    
+    logger.info("enqueuer_dispatch | task_id=%s preparando envío", task_id)
+
     try:
-        # 1. Payload INTERNO (Lo que recibirá Filtros AI al final)
         base_url = settings.external_dispatch_callback_base_url.rstrip("/")
         callback_url = f"{base_url}/callbacks/filtros"
-        
+
         worker_payload = {
             "task_id": task_id,
             "client_name": task_data.get("name"),
@@ -133,8 +152,6 @@ async def _dispatch_to_external_service(task_id: str, task_data: dict, link_inta
             }
         }
 
-        # 2. Payload EXTERNO (Para el Enqueuer)
-        # Tu script 'main.py' espera: service, payload, worker_api_key
         enqueuer_payload = {
             "service": "filtros-ai",
             "worker_api_key": settings.filtros_api_key,
@@ -142,13 +159,9 @@ async def _dispatch_to_external_service(task_id: str, task_data: dict, link_inta
             "idempotency_key": f"task-{task_id}-{uuid.uuid4().hex[:6]}"
         }
 
-        headers = {
-            "Content-Type": "application/json"
-            # NOTA: No enviamos X-API-Key en el header hacia el Enqueuer, 
-            # lo enviamos en el body ('worker_api_key') según tu diseño.
-        }
+        headers = {"Content-Type": "application/json"}
 
-        logger.info(f"📦 [Enqueuer Dispatch] Enviando a {settings.external_dispatch_url}")
+        logger.info("enqueuer_dispatch | task_id=%s enviando a %s", task_id, settings.external_dispatch_url)
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
@@ -156,20 +169,21 @@ async def _dispatch_to_external_service(task_id: str, task_data: dict, link_inta
                 json=enqueuer_payload,
                 headers=headers
             )
-            
+
             if response.status_code >= 400:
-                logger.error(f"❌ Error Enqueuer Body: {response.text}")
-                
+                logger.error(
+                    "enqueuer_dispatch | task_id=%s HTTP %s body=%s",
+                    task_id, response.status_code, response.text
+                )
+
             response.raise_for_status()
-            
             resp_data = response.json()
-            # Tu enqueuer devuelve: {"ok": True, "task": "...", ...}
-            logger.info(f"✅ [Enqueued] Tarea creada: {resp_data.get('task')}")
+            logger.info("enqueuer_dispatch | task_id=%s encolado ok task=%s", task_id, resp_data.get("task"))
 
         return True
 
     except Exception as e:
-        logger.error(f"❌ [Background] Error llamando al Enqueuer: {e}")
+        logger.error("enqueuer_dispatch | task_id=%s error=%s", task_id, e)
         return False
 
 
@@ -210,10 +224,12 @@ async def _sync_to_google_sheets(task_data: dict) -> bool:
             if field_value:
                 data[field_name] = field_value
                 
-        logger.info(f"📝 [Background] Escribiendo en Sheets para {task_data.get('id')}")
+        logger.info("sheets_sync | task_id=%s escribiendo en Sheets", task_data.get("id"))
         success = sheets_service.write_row(data)
+        if not success:
+            logger.warning("sheets_sync | task_id=%s write_row devolvió False", task_data.get("id"))
         return success
 
     except Exception as e:
-        logger.error(f"Error syncing task to Google Sheets: {e}")
+        logger.error("sheets_sync | task_id=%s error=%s", task_data.get("id"), e)
         return False
