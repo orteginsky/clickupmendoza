@@ -13,15 +13,17 @@ def list_webhooks():
 
     headers = {"Authorization": API_TOKEN}
     
-    # 1. Obtener Team ID
     try:
         r = httpx.get("https://api.clickup.com/api/v2/team", headers=headers)
-        team_id = r.json()["teams"][0]["id"]
-    except:
-        print("❌ Error conectando a ClickUp")
+        teams = r.json().get("teams", [])
+        if not teams:
+            print("❌ No se encontraron equipos asociados a este Token.")
+            return
+        team_id = teams[0]["id"]
+    except Exception as e:
+        print(f"❌ Error conectando a ClickUp: {e}")
         return
 
-    # 2. Listar Webhooks
     print(f"🔍 Buscando webhooks para el equipo {team_id}...\n")
     url = f"https://api.clickup.com/api/v2/team/{team_id}/webhook"
     
@@ -30,31 +32,38 @@ def list_webhooks():
         webhooks = resp.json().get("webhooks", [])
         
         if not webhooks:
-            print("⚠️ No se encontraron webhooks.")
+            print("⚠️ No se encontraron webhooks activos.")
             return
 
         for w in webhooks:
-            print("-" * 50)
-            print(f"🆔 ID:       {w['id']}")
-            print(f"📋 User:     {w['userid']}")
-            print(f"🔗 Endpoint: {w['endpoint']}")
-            print(f"🚦 Status:   {w['status']}  <-- ¡REVISA ESTO!")
+            # Extraemos datos de forma segura usando .get() para evitar el error 'KeyError'
+            webhook_id = w.get('id')
+            endpoint = w.get('endpoint')
+            user_id = w.get('userid')
+            events = w.get('events', [])
             
-            # Verificamos errores de salud
-            health = w.get("health", {})
-            if health.get("fail_count", 0) > 0:
-                print(f"❌ FAILS:    {health['fail_count']} errores recientes")
+            # El estado real suele estar en health -> status
+            health = w.get('health', {})
+            status = health.get('status', 'unknown') 
+            fail_count = health.get('fail_count', 0)
+
+            print("-" * 60)
+            print(f"🆔 ID:       {webhook_id}")
+            print(f"📋 Creado por User ID: {user_id}")
+            print(f"🔗 Endpoint: {endpoint}")
+            print(f"🚦 Estado:   {status.upper()}")
             
-            # Verificamos eventos
-            print(f"📢 Eventos:  {', '.join(w.get('events', []))}")
-            
-            # Intentamos ver dónde está instalado (List/Folder)
-            # Nota: ClickUp no siempre devuelve el resource_id claro en el listado,
-            # pero el webhook.id nos sirve para editarlo en la web.
-            print("-" * 50)
+            if fail_count > 0:
+                print(f"⚠️ Alerta:   Tiene {fail_count} fallos acumulados.")
+                print(f"             (Si llega a 5, ClickUp lo suspende)")
+
+            print(f"📢 Eventos registrados ({len(events)}):")
+            for event in events:
+                print(f"   • {event}")
+            print("-" * 60)
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error procesando la lista: {e}")
 
 if __name__ == "__main__":
     list_webhooks()

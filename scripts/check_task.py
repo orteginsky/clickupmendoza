@@ -2,48 +2,55 @@ import os
 import httpx
 from dotenv import load_dotenv
 
+# 1. Cargar variables de entorno
 load_dotenv()
+
+# --- CONFIGURACIÓN ---
 API_TOKEN = os.getenv("CLICKUP_API_TOKEN")
+TASK_ID = "86b8dx1y1" 
 
-# Pon aquí el ID de la tarea que estás usando para probar (ej: "86b86m8pu")
-TASK_ID = "86b86zq6z" 
+headers = {
+    "Authorization": API_TOKEN, 
+    "Content-Type": "application/json"
+}
 
-def check_task_location():
-    headers = {"Authorization": API_TOKEN}
-    url = f"https://api.clickup.com/api/v2/task/{TASK_ID}"
+def inspect_task_custom_fields(task_id):
+    print(f"🔍 Analizando campos personalizados de la Tarea: {task_id}...\n")
+    
+    # Endpoint para obtener los detalles de una tarea específica
+    # Incluimos custom_task_ids=true por si usas IDs personalizados en tu espacio
+    url = f"https://api.clickup.com/api/v2/task/{task_id}"
     
     try:
-        r = httpx.get(url, headers=headers)
-        if r.status_code != 200:
-            print(f"❌ Error al buscar tarea: {r.status_code}")
-            return
-            
-        task = r.json()
-        print(f"🔎 Tarea: {task['name']} ({task['id']})")
+        response = httpx.get(url, headers=headers)
+        response.raise_for_status()
         
-        # 1. Ver lista principal
-        main_list = task['list']
-        print(f"🏠 Lista Principal (Home): {main_list['name']} - ID: {main_list['id']}")
-        
-        # 2. Ver ubicación de webhook
-        # Pon aquí el ID de la lista donde registraste el webhook
-        WEBHOOK_LIST_ID = "901403238634" 
-        
-        if main_list['id'] == WEBHOOK_LIST_ID:
-            print("✅ La tarea VIVE en la lista del webhook.")
-        else:
-            print("⚠️ La tarea NO vive en la lista del webhook.")
-            
-        # 3. Ver Listas Espejo (Locations)
-        # ClickUp a veces guarda esto en 'locations' o hay que deducirlo
-        print("\n--- Verificando si el webhook debería dispararse ---")
-        if main_list['id'] != WEBHOOK_LIST_ID:
-             print(f"❌ PROBLEMA DETECTADO: El webhook está en la lista {WEBHOOK_LIST_ID},")
-             print(f"   pero la tarea pertenece a la lista {main_list['id']}.")
-             print("   Si no es una lista espejo, el webhook NO se activará.")
+        task_data = response.json()
+        custom_fields = task_data.get("custom_fields", [])
 
+        if not custom_fields:
+            print("⚠️ No se encontraron campos personalizados en esta tarea.")
+            return
+
+        print(f"{'NOMBRE DEL CAMPO':<25} | {'ID':<20} | {'TIPO'}")
+        print("-" * 70)
+
+        for field in custom_fields:
+            name = field.get("name", "N/A")
+            f_id = field.get("id", "N/A")
+            f_type = field.get("type", "N/A")
+            
+            # Algunos tipos comunes: 'url', 'drop_down', 'short_text', 'number'
+            print(f"{name:<25} | {f_id:<20} | {f_type}")
+
+    except httpx.HTTPStatusError as e:
+        print(f"❌ Error de HTTP: {e.response.status_code} - {e.response.text}")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Ocurrió un error inesperado: {e}")
 
 if __name__ == "__main__":
-    check_task_location()
+    # Asegúrate de que el TOKEN esté configurado
+    if not API_TOKEN:
+        print("❌ Error: No se encontró CLICKUP_API_TOKEN en el archivo .env")
+    else:
+        inspect_task_custom_fields(TASK_ID)

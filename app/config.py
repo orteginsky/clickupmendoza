@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     clickup_api_token: str
     clickup_webhook_secret: str
     clickup_webhook_secret_assignments: str
+    clickup_webhook_secret_strategy: Optional[str] = "REPLACE_ME"
     clickup_team_id: Optional[str] = None
     clickup_list_id: Optional[str] = None
     clickup_trigger_condicional: Optional[str] = None

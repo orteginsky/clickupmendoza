@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.config import settings
-from app.api import webhooks, leads, callbacks, webhook_assignments, drive_sync
+from app.api import webhooks, leads, callbacks, webhook_assignments, drive_sync, webhook_strategy
 
 # ============================================================================
 # Lifespan Event Handler (Reemplaza a on_event)
@@ -51,6 +51,9 @@ app.include_router(leads.router)
 
 # Nueva lista: CASE ASSIGNMENT
 app.include_router(webhook_assignments.router)
+
+# Nueva lista: STRATEGY NEW CASES
+app.include_router(webhook_strategy.router)
 
 # Callbacks e IA
 app.include_router(callbacks.router, prefix="/callbacks", tags=["Callbacks"])

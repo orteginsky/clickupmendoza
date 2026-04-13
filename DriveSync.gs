@@ -1,103 +1,132 @@
 /**
  * DriveSync.gs — Google Apps Script
  * ============================================================
- * Trigger de Google Drive que detecta PDFs nuevos en la carpeta
- * "Fireflies Meetings" y los sincroniza con la Nexus Legal API.
+ * Script independiente que escanea periódicamente la carpeta
+ * "Fireflies Meetings" en busca de PDFs nuevos y los sincroniza
+ * con la Nexus Legal API.
  *
- * INSTALACIÓN DEL TRIGGER (una sola vez por proyecto):
- * -----------------------------------------------------
- * 1. Abre el editor: Extensions → Apps Script
- * 2. Ve a la sección "Triggers" (ícono de reloj en el panel izquierdo)
- * 3. Haz clic en "+ Add Trigger" (esquina inferior derecha)
- * 4. Configura:
- *      - Function to run   : onDriveChange
- *      - Deployment        : Head
- *      - Event source      : From Google Drive
- *      - Event type        : On change
- * 5. Guarda. Google pedirá autorización la primera vez.
+ * INSTALACIÓN DEL TRIGGER (una sola vez):
+ * ----------------------------------------
+ * Opción A — Automática (recomendada):
+ *   1. Abre el editor: Extensions → Apps Script
+ *   2. Selecciona la función "installTrigger" en el menú desplegable
+ *   3. Haz clic en ▶ Run
+ *   Esto instala un trigger que ejecuta scanNewPdfs cada 5 minutos.
+ *
+ * Opción B — Manual desde la UI:
+ *   1. Ve a la sección "Triggers" (ícono de reloj en el panel izquierdo)
+ *   2. Haz clic en "+ Add Trigger" (esquina inferior derecha)
+ *   3. Configura:
+ *        - Function to run   : scanNewPdfs
+ *        - Deployment        : Head
+ *        - Event source      : Time-driven
+ *        - Time type         : Minutes timer
+ *        - Interval          : Every 5 minutes
+ *   4. Guarda. Google pedirá autorización la primera vez.
  *
  * CONFIGURACIÓN (Script Properties):
  * ------------------------------------
  * Agrega estas propiedades en Project Settings → Script Properties:
- *   NEXUS_API_URL      → URL base de Nexus Legal API en Cloud Run
- *                        ej. https://nexus-legal-api-xxxx-uc.a.run.app
- *   DRIVE_SYNC_SECRET  → El mismo token configurado en DRIVE_SYNC_SECRET
- *                        de la API (sin el prefijo "Bearer")
- *   ROOT_FOLDER_ID     → ID de la carpeta "Fireflies Meetings" en Drive
- *                        (parte de la URL: drive.google.com/drive/folders/<ID>)
+ *   NEXUS_API_URL      → https://nexus-legal-api-223080314602.us-central1.run.app
+ *   DRIVE_SYNC_SECRET  → rOgYIzi9zeJlCDMbv-kiT1poi1zF0jrsEVrGY9lhnzY
+ *
+ * NOTA: ROOT_FOLDER_ID NO se necesita. El script detecta automáticamente
+ * su carpeta padre ("Fireflies Meetings") como carpeta raíz.
+ *
+ * RENOMBRADO AUTOMÁTICO:
+ * Al sincronizar con éxito, el archivo PDF es renombrado a:
+ *   <NOMBRE_CLIENTE> - ENVIADO.pdf
+ * Los archivos que ya contienen "ENVIADO" en su nombre son ignorados.
  */
 
 // ---------------------------------------------------------------------------
-// Constantes de configuración (leídas de Script Properties)
+// Script Properties
 // ---------------------------------------------------------------------------
 
-/**
- * Devuelve las propiedades del script.
- * @returns {GoogleAppsScript.Properties.Properties}
- */
 function getProps_() {
   return PropertiesService.getScriptProperties();
 }
 
 // ---------------------------------------------------------------------------
-// Handler principal del trigger onChange
+// Función principal — ejecutada por el trigger de tiempo
 // ---------------------------------------------------------------------------
 
 /**
- * Punto de entrada del trigger onChange de Google Drive.
- * Se ejecuta automáticamente cuando hay cambios en Drive.
+ * Escanea la carpeta del script buscando PDFs nuevos (creados desde la
+ * última ejecución) y los envía a la Nexus Legal API.
  *
- * @param {GoogleAppsScript.Drive.Schema.Change} e - Evento de cambio de Drive
+ * Esta es la función que debe configurarse como trigger de tiempo.
  */
-function onDriveChange(e) {
-  // Solo procesar eventos de tipo ADDED
-  if (!e || e.changeType !== 'ADDED') {
+function scanNewPdfs() {
+  var scriptFolder = getScriptFolder_();
+  if (!scriptFolder) {
+    Logger.log('ERROR: No se pudo obtener la carpeta del script.');
     return;
   }
 
-  var fileId = e.fileId;
-  if (!fileId) {
-    Logger.log('onDriveChange: evento sin fileId, ignorado.');
-    return;
+  var props = getProps_();
+  var lastRunMs = props.getProperty('LAST_RUN_TIMESTAMP');
+
+  // En la primera ejecución, revisar las últimas 24 horas
+  var since = lastRunMs
+    ? new Date(parseInt(lastRunMs, 10))
+    : new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  var now = new Date();
+
+  Logger.log(
+    'scanNewPdfs: carpeta=' + scriptFolder.getName() +
+    ' | desde=' + since.toISOString()
+  );
+
+  processNewPdfsInFolder_(scriptFolder, since);
+
+  // Guardar timestamp para la próxima ejecución
+  props.setProperty('LAST_RUN_TIMESTAMP', now.getTime().toString());
+}
+
+// ---------------------------------------------------------------------------
+// Búsqueda y procesamiento de PDFs
+// ---------------------------------------------------------------------------
+
+/**
+ * Busca PDFs nuevos dentro de una carpeta (y sus subcarpetas) creados
+ * después de `since`. Ignora archivos que ya contienen "ENVIADO".
+ *
+ * @param {GoogleAppsScript.Drive.Folder} folder
+ * @param {Date} since - Solo procesar archivos creados después de esta fecha
+ */
+function processNewPdfsInFolder_(folder, since) {
+  // Drive query: PDFs no eliminados creados después del último run
+  var sinceIso = since.toISOString();
+  var query = 'mimeType = "application/pdf"'
+    + ' and trashed = false'
+    + ' and createdTime > "' + sinceIso + '"';
+
+  var files = folder.searchFiles(query);
+
+  while (files.hasNext()) {
+    var file = files.next();
+    var fileName = file.getName();
+
+    // Saltar archivos ya procesados por este script
+    if (fileName.toUpperCase().indexOf('ENVIADO') !== -1) {
+      Logger.log('scanNewPdfs: ignorado (ya enviado): ' + fileName);
+      continue;
+    }
+
+    var fileUrl = file.getUrl();
+    var folderDate = getParentFolderName_(file);
+
+    Logger.log('scanNewPdfs: procesando — ' + fileName + ' | fecha=' + folderDate);
+    callNexusApi_(file, fileName, fileUrl, folderDate);
   }
 
-  var file;
-  try {
-    file = DriveApp.getFileById(fileId);
-  } catch (err) {
-    Logger.log('onDriveChange: no se pudo acceder al archivo ' + fileId + ': ' + err);
-    return;
+  // Recorrer subcarpetas recursivamente
+  var subfolders = folder.getFolders();
+  while (subfolders.hasNext()) {
+    processNewPdfsInFolder_(subfolders.next(), since);
   }
-
-  // Filtrar solo PDFs
-  var mimeType = file.getMimeType();
-  var fileName = file.getName();
-
-  var isPdf =
-    mimeType === 'application/pdf' ||
-    fileName.toLowerCase().endsWith('.pdf');
-
-  if (!isPdf) {
-    Logger.log('onDriveChange: archivo ignorado (no es PDF): ' + fileName);
-    return;
-  }
-
-  // Verificar que el archivo está dentro de la carpeta raíz configurada
-  var rootFolderId = getProps_().getProperty('ROOT_FOLDER_ID');
-  if (rootFolderId && !isInsideFolder_(file, rootFolderId)) {
-    Logger.log('onDriveChange: PDF fuera de la carpeta raíz, ignorado: ' + fileName);
-    return;
-  }
-
-  // Obtener metadatos
-  var filenameRaw = stripPdfExtension_(fileName);
-  var fileUrl = file.getUrl();
-  var folderDate = getParentFolderName_(file);
-
-  Logger.log('onDriveChange: procesando PDF — ' + filenameRaw + ' | ' + folderDate);
-
-  // Llamar a la API
-  callNexusApi_(filenameRaw, fileUrl, folderDate);
 }
 
 // ---------------------------------------------------------------------------
@@ -106,12 +135,15 @@ function onDriveChange(e) {
 
 /**
  * Hace POST a /drive/sync con los metadatos del archivo.
+ * Si la sincronización es exitosa, renombra el archivo a:
+ *   <nombre_clickup> - ENVIADO.pdf
  *
- * @param {string} filenameRaw  - Nombre del archivo sin extensión
+ * @param {GoogleAppsScript.Drive.File} file
+ * @param {string} filenameRaw  - Nombre del archivo (con extensión .pdf)
  * @param {string} fileUrl      - URL de Drive del archivo
  * @param {string} folderDate   - Nombre de la carpeta padre (ej. "2026-03-25")
  */
-function callNexusApi_(filenameRaw, fileUrl, folderDate) {
+function callNexusApi_(file, filenameRaw, fileUrl, folderDate) {
   var props = getProps_();
   var apiUrl = props.getProperty('NEXUS_API_URL');
   var secret = props.getProperty('DRIVE_SYNC_SECRET');
@@ -125,23 +157,21 @@ function callNexusApi_(filenameRaw, fileUrl, folderDate) {
 
   var body = JSON.stringify({
     filename_raw: filenameRaw,
-    file_url: fileUrl,
-    folder_date: folderDate || null
+    file_url:     fileUrl,
+    folder_date:  folderDate || null
   });
 
   var options = {
-    method: 'post',
-    contentType: 'application/json',
-    headers: {
-      Authorization: 'Bearer ' + secret
-    },
-    payload: body,
-    muteHttpExceptions: true  // Para poder leer el body en caso de error
+    method:          'post',
+    contentType:     'application/json',
+    headers:         { Authorization: 'Bearer ' + secret },
+    payload:         body,
+    muteHttpExceptions: true
   };
 
   try {
-    var response = UrlFetchApp.fetch(endpoint, options);
-    var code = response.getResponseCode();
+    var response     = UrlFetchApp.fetch(endpoint, options);
+    var code         = response.getResponseCode();
     var responseBody = response.getContentText();
 
     if (code === 200) {
@@ -151,6 +181,18 @@ function callNexusApi_(filenameRaw, fileUrl, folderDate) {
         ' | nombre=' + data.nombre_clickup +
         ' | field_updated=' + data.field_updated
       );
+
+      // Renombrar el archivo para indicar que fue enviado por la automatización
+      if (data.nombre_clickup) {
+        var newName = data.nombre_clickup + ' - ENVIADO.pdf';
+        try {
+          file.setName(newName);
+          Logger.log('RENAMED | ' + filenameRaw + ' → ' + newName);
+        } catch (renameErr) {
+          Logger.log('WARN | No se pudo renombrar el archivo: ' + renameErr);
+        }
+      }
+
     } else if (code === 404) {
       var errData = JSON.parse(responseBody);
       Logger.log(
@@ -173,18 +215,23 @@ function callNexusApi_(filenameRaw, fileUrl, folderDate) {
 // ---------------------------------------------------------------------------
 
 /**
- * Elimina la extensión .pdf (case-insensitive) del nombre del archivo.
+ * Devuelve la carpeta donde está guardado este archivo de Apps Script
+ * ("Fireflies Meetings"). No requiere ninguna configuración manual.
  *
- * @param {string} name - Nombre completo del archivo
- * @returns {string}
+ * @returns {GoogleAppsScript.Drive.Folder|null}
  */
-function stripPdfExtension_(name) {
-  return name.replace(/\.pdf$/i, '');
+function getScriptFolder_() {
+  try {
+    return DriveApp.getFileById(ScriptApp.getScriptId()).getParents().next();
+  } catch (err) {
+    Logger.log('WARN | No se pudo obtener la carpeta del script: ' + err);
+    return null;
+  }
 }
 
 /**
  * Devuelve el nombre de la carpeta padre inmediata del archivo.
- * Si el archivo no tiene padre (carpeta raíz de Drive), devuelve null.
+ * Si el archivo no tiene padre, devuelve null.
  *
  * @param {GoogleAppsScript.Drive.File} file
  * @returns {string|null}
@@ -197,51 +244,75 @@ function getParentFolderName_(file) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Utilidades de trigger (ejecutar manualmente desde el editor)
+// ---------------------------------------------------------------------------
+
 /**
- * Comprueba recursivamente si un archivo está dentro de la carpeta
- * con el ID dado. Evita procesar PDFs de otras partes de Drive.
- *
- * @param {GoogleAppsScript.Drive.File} file
- * @param {string} folderId - ID de la carpeta raíz objetivo
- * @returns {boolean}
+ * Instala el trigger de tiempo programáticamente.
+ * Ejecuta esta función UNA SOLA VEZ desde el editor para activar
+ * la automatización. Evita duplicar el trigger si ya existe.
  */
-function isInsideFolder_(file, folderId) {
-  var parents = file.getParents();
-  while (parents.hasNext()) {
-    var parent = parents.next();
-    if (parent.getId() === folderId) {
-      return true;
-    }
-    // Buscar un nivel más arriba (hasta raíz de Drive)
-    if (isInsideFolder_(DriveApp.getFolderById(parent.getId()), folderId)) {
-      return true;
+function installTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'scanNewPdfs') {
+      Logger.log('El trigger scanNewPdfs ya está instalado. No se creó uno nuevo.');
+      return;
     }
   }
-  return false;
+
+  ScriptApp.newTrigger('scanNewPdfs')
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  Logger.log('Trigger instalado: scanNewPdfs cada 5 minutos.');
 }
 
-// ---------------------------------------------------------------------------
-// Utilidad: instalar el trigger programáticamente (ejecución manual)
-// ---------------------------------------------------------------------------
+/**
+ * Elimina todos los triggers de scanNewPdfs.
+ * Útil para reemplazar el trigger con una configuración nueva.
+ */
+function removeTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'scanNewPdfs') {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  Logger.log('Triggers eliminados: ' + removed);
+}
 
 /**
- * Verifica si el trigger onChange ya está instalado y lo reporta.
- * Ejecuta esta función desde el editor para diagnóstico.
- *
- * NOTA: Los triggers de tipo "On change" (Drive) SOLO se pueden instalar
- * desde la UI de Apps Script — no existe API programática para crearlos.
- * Sigue las instrucciones al inicio del archivo.
+ * Diagnóstico: muestra el estado del trigger y las Script Properties.
+ * Ejecuta desde el editor para verificar la configuración.
  */
-function checkTrigger() {
+function checkStatus() {
+  // Triggers
   var triggers = ScriptApp.getProjectTriggers();
   var found = false;
   for (var i = 0; i < triggers.length; i++) {
-    if (triggers[i].getHandlerFunction() === 'onDriveChange') {
-      Logger.log('✅ Trigger onDriveChange está instalado (ID: ' + triggers[i].getUniqueId() + ')');
+    if (triggers[i].getHandlerFunction() === 'scanNewPdfs') {
+      Logger.log('Trigger OK — scanNewPdfs instalado (ID: ' + triggers[i].getUniqueId() + ')');
       found = true;
     }
   }
   if (!found) {
-    Logger.log('⚠️  Trigger onDriveChange NO está instalado. Instálalo desde la UI de Triggers.');
+    Logger.log('SIN TRIGGER — Ejecuta installTrigger() para activarlo.');
   }
+
+  // Script Properties
+  var props = getProps_();
+  Logger.log('NEXUS_API_URL     = ' + (props.getProperty('NEXUS_API_URL')     || '(no definida)'));
+  Logger.log('DRIVE_SYNC_SECRET = ' + (props.getProperty('DRIVE_SYNC_SECRET') ? '***' : '(no definida)'));
+  Logger.log('LAST_RUN          = ' + (props.getProperty('LAST_RUN_TIMESTAMP')
+    ? new Date(parseInt(props.getProperty('LAST_RUN_TIMESTAMP'), 10)).toISOString()
+    : '(nunca ejecutado)'));
+
+  // Carpeta del script
+  var folder = getScriptFolder_();
+  Logger.log('Carpeta script    = ' + (folder ? folder.getName() + ' (' + folder.getId() + ')' : 'ERROR'));
 }
