@@ -8,7 +8,6 @@ load_dotenv()
 
 # Configuración
 CLICKUP_API_TOKEN = os.getenv("CLICKUP_API_TOKEN")
-# Lista proporcionada por el usuario: 901412734772
 CLICKUP_LIST_ID = 901412734772
 WEBHOOK_URL = "https://nexus-legal-api-223080314602.us-central1.run.app/webhooks/strategy"
 

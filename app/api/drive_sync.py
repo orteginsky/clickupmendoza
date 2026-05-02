@@ -32,7 +32,7 @@ FIELD_ID_LINK_INTAKE = "1c35f9be-9fe2-4a0c-b0af-9f4f92dd4554"
 
 STOPWORDS = {
     "intake", "pdf", "archivo", "mp3", "interview", "appointment",
-    "new", "with", "for",
+    "new", "with", "for", "vs", "versus", "dvs", "pt", "mp",
     "2026", "2025", "2024", "2023",
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
@@ -48,14 +48,22 @@ def _normalize_filename(raw: str) -> str:
     """
     Convierte un nombre de archivo crudo en un query limpio para búsqueda:
     1. Normaliza a NFC (unifica caracteres con acento).
-    2. Reemplaza todo lo que no sea letra o espacio por espacio.
-    3. Elimina tokens que sean stopwords o secuencias de 4+ dígitos.
-    4. Colapsa espacios y convierte a UPPERCASE.
+    2. Trunca en " DVS " si existe (para quitar segunda parte de la carátula).
+    3. Reemplaza todo lo que no sea letra o espacio por espacio.
+    4. Elimina tokens que sean stopwords o secuencias de 4+ dígitos.
+    5. Colapsa espacios y convierte a UPPERCASE.
     """
+    if not raw:
+        return ""
+
     # 1. Unicode NFC
     text = unicodedata.normalize("NFC", raw)
 
-    # 2. Reemplaza no-letras (excepto espacios) por espacio
+    # 2. Truncar en delimitadores comunes de carátula (Versus, etc)
+    # Buscamos " DVS " o " VS " de forma insensible a mayúsculas
+    text = re.split(r"(?i)\s+(?:DVS|VS)\s+", text)[0]
+
+    # 3. Reemplaza no-letras (excepto espacios) por espacio
     text = re.sub(r"[^a-zA-ZáéíóúüñÁÉÍÓÚÜÑ\s]", " ", text)
 
     # 3. Tokenizar, filtrar stopwords y números de 4+ dígitos
@@ -152,7 +160,11 @@ async def drive_sync(
     results = repo.search_by_name(nombre_clean, limit=1)
 
     if not results:
-        logger.warning("drive_sync | lead_not_found query=%r", nombre_clean)
+        logger.warning(
+            "drive_sync | lead_not_found | query=%r | filename_raw=%r",
+            nombre_clean,
+            payload.filename_raw,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": "lead_not_found", "query": nombre_clean},
@@ -161,12 +173,22 @@ async def drive_sync(
     lead = results[0]
     task_id: str = lead.task_id
     nombre_clickup: str = lead.nombre_clickup or ""
-    logger.info("drive_sync | lead encontrado task_id=%s nombre=%s", task_id, nombre_clickup)
+    logger.info(
+        "drive_sync | lead encontrado | task_id=%s | nombre=%s | query=%s",
+        task_id,
+        nombre_clickup,
+        nombre_clean,
+    )
 
     # 3. Actualizar campo en ClickUp -----------------------------------------
     field_updated = False
     try:
         clickup = ClickUpService()
+        logger.info(
+            "drive_sync | actualizando ClickUp | task_id=%s | field_id=%s",
+            task_id,
+            FIELD_ID_LINK_INTAKE,
+        )
         field_updated = await clickup.set_custom_field_value(
             task_id=task_id,
             field_id=FIELD_ID_LINK_INTAKE,
@@ -174,13 +196,14 @@ async def drive_sync(
         )
         if field_updated:
             logger.info(
-                "drive_sync | campo actualizado task_id=%s url=%s",
+                "drive_sync | campo actualizado OK | task_id=%s | url=%s",
                 task_id,
                 payload.file_url,
             )
         else:
+            # ClickUpService ya loguea el error específico
             logger.warning(
-                "drive_sync | fallo al actualizar campo ClickUp task_id=%s", task_id
+                "drive_sync | fallo al actualizar campo ClickUp | task_id=%s", task_id
             )
     except Exception as exc:
         # Non-blocking: logeamos pero no lanzamos excepción

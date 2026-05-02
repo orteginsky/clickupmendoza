@@ -152,10 +152,13 @@ class ClickUpService:
                         json=payload, 
                         timeout=10.0
                     )
+                    if response.is_error:
+                         print(
+                            f"❌ Error ClickUp API | status={response.status_code} "
+                            f"| response={response.text}"
+                         )
                     response.raise_for_status()
                     return True
-                except httpx.HTTPError as e:
-                    print(f"❌ Error actualizando campo {field_id} en tarea {task_id}: {e}")
-                    # Si quieres ver el detalle del error de ClickUp:
-                    # print(e.response.text if hasattr(e, 'response') else str(e))
+                except Exception as e:
+                    print(f"❌ Error actualizando campo en ClickUp task_id={task_id}: {e}")
                     return False
